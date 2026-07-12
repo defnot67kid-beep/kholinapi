@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: GET likes is public, POST likes requires verification
+// server.js - ULTIMATE FIX: GET likes is public, POST likes returns correct state
 const express = require('express');
 const cors = require('cors');
 
@@ -53,12 +53,11 @@ app.get('/api/users/:userId/verify', (req, res) => {
 });
 
 // ============================================
-// 3. FETCH LIKES (PUBLIC - NO 403 ERROR)
+// 3. FETCH LIKES (PUBLIC)
 // ============================================
 app.get('/stats/:userId/likes', (req, res) => {
     try {
         const { userId } = req.params;
-        // ANYONE can fetch likes. We do NOT block this.
         const likerSet = likeDatabase.get(userId) || new Set();
         const likerIds = Array.from(likerSet);
         res.json({ success: true, userId, count: likerIds.length, likerIds });
@@ -101,6 +100,7 @@ app.post('/stats/:userId/likes', (req, res) => {
         const updatedLikerIds = Array.from(likerSet);
         console.log(`[API] Like ${action}: ${userId} by ${likerId}. Count: ${updatedLikerIds.length}`);
 
+        // CRITICAL FIX: Return the FULL updated state
         res.json({ 
             success: true, 
             action: action,
