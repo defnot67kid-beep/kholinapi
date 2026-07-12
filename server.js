@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: Persistent Map/Set, Perfect Verification Sync
+// server.js - ULTIMATE FIX: Map/Set storage, correct 403 handling
 const express = require('express');
 const cors = require('cors');
 
@@ -7,7 +7,7 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================
-// PERSISTENT IN-MEMORY DATABASE (Using Map/Set)
+// PERSISTENT IN-MEMORY DATABASE
 // ============================================
 const kholinUsers = new Map();      // Key: UserId, Value: { username, verified }
 const likeDatabase = new Map();     // Key: TargetUserId, Value: Set of LikerIds
@@ -40,14 +40,12 @@ app.post('/api/users/register', (req, res) => {
 });
 
 // ============================================
-// 2. CHECK VERIFICATION (CRITICAL FIX)
+// 2. CHECK VERIFICATION
 // ============================================
 app.get('/api/users/:userId/verify', (req, res) => {
     try {
         const { userId } = req.params;
         const user = kholinUsers.get(userId);
-        
-        // Return verified: true ONLY if user exists in Map
         res.json({ verified: !!(user && user.verified) });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -60,6 +58,7 @@ app.get('/api/users/:userId/verify', (req, res) => {
 app.get('/stats/:userId/likes', (req, res) => {
     try {
         const { userId } = req.params;
+        // Ensure the user exists, otherwise return 0 likes
         const likerSet = likeDatabase.get(userId) || new Set();
         const likerIds = Array.from(likerSet);
         res.json({ success: true, userId, count: likerIds.length, likerIds });
