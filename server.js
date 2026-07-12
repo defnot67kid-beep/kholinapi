@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: Strict verification, Proper Self Check
+// server.js - ULTIMATE FIX: Strict Verification, Database Check
 const express = require('express');
 const cors = require('cors');
 
@@ -27,12 +27,11 @@ app.post('/api/users/register', (req, res) => {
         username = (username || 'Unknown').replace(/[\n\r]+/g, '').trim();
         displayName = (displayName || username).replace(/[\n\r]+/g, '').trim();
 
-        // Check if user is the actual owner of the profile
+        // STRICT CHECK: User MUST be self to be verified
         const isSelf = (friendship_status === "self" && follow_status === "self");
 
         console.log(`[API] Processing User: ${userId} (${username}) - Self: ${isSelf}`);
         
-        // Store in database
         kholinUsers.set(userId, {
             username: username,
             displayName: displayName,
@@ -80,7 +79,7 @@ app.get('/stats/:userId/likes', (req, res) => {
 });
 
 // ============================================
-// 4. TOGGLE LIKE (VERIFIED USERS ONLY)
+// 4. TOGGLE LIKE (STRICT: VERIFIED USERS ONLY)
 // ============================================
 app.post('/stats/:userId/likes', (req, res) => {
     try {
@@ -90,7 +89,7 @@ app.post('/stats/:userId/likes', (req, res) => {
         if (!likerId) return res.status(400).json({ error: "Missing likerId" });
         if (userId === likerId) return res.status(403).json({ error: "Self-like blocked" });
 
-        // Security: Check if liker is verified in the Map
+        // STRICT SECURITY: Check if liker is verified in the Map
         const liker = kholinUsers.get(likerId);
         if (!liker || !liker.verified) {
             return res.status(403).json({ error: "Only verified users can like" });
