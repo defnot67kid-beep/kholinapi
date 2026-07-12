@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: GET likes is public, POST likes returns correct state
+// server.js - ULTIMATE FIX: Clean JSON, Added usersLikedTo array
 const express = require('express');
 const cors = require('cors');
 
@@ -21,14 +21,18 @@ app.get('/', (req, res) => res.send('Kholin API Running'));
 // ============================================
 app.post('/api/users/register', (req, res) => {
     try {
-        const { userId, username, displayName } = req.body;
+        let { userId, username, displayName } = req.body;
         if (!userId) return res.status(400).json({ error: 'Missing userId' });
+
+        // CRITICAL FIX: Sanitize strings to remove \n and extra spaces
+        username = (username || 'Unknown').replace(/[\n\r]+/g, '').trim();
+        displayName = (displayName || username).replace(/[\n\r]+/g, '').trim();
 
         console.log(`[API] Registered/Verified User: ${userId} (${username})`);
         
         kholinUsers.set(userId, {
-            username: username || 'Unknown',
-            displayName: displayName || username || 'Unknown',
+            username: username,
+            displayName: displayName,
             lastSeen: new Date().toISOString(),
             verified: true
         });
@@ -118,10 +122,28 @@ app.get('/api/users', (req, res) => {
     try {
         // Convert the Map to a readable JSON array
         const users = Array.from(kholinUsers.entries()).map(([userId, data]) => {
-            return { userId, ...data };
+            
+            // CRITICAL FEATURE: Calculate the list of users THIS user has liked
+            const usersLikedTo = [];
+            
+            // Iterate through the entire likeDatabase
+            for (const [targetUserId, likerSet] of likeDatabase.entries()) {
+                // If this userId is inside the likerSet, it means they liked targetUserId
+                if (likerSet.has(userId)) {
+                    usersLikedTo.push(targetUserId);
+                }
+            }
+
+            return { 
+                userId, 
+                ...data,
+                usersLikedTo: usersLikedTo // Add the array of liked User IDs
+            };
         });
+        
         res.json({ success: true, count: users.length, users });
     } catch (e) {
+        console.error('[API Error] /api/users failed:', e);
         res.status(500).json({ error: e.message });
     }
 });
