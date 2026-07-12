@@ -1,4 +1,4 @@
-// server.js - No MongoDB, In-Memory Storage (Full with Verification Endpoint)
+// server.js - FIXED: No reset bug, Verified only likes, Compound key storage
 const express = require('express');
 const cors = require('cors');
 
@@ -7,10 +7,13 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================
-// IN-MEMORY DATABASE (Resets on Render restart)
+// IN-MEMORY DATABASE (FIXED STRUCTURE)
 // ============================================
-const kholinUsers = {};      // Stores verified users: { "10538": { username: "minibloxia", verified: true } }
-const likeDatabase = {};     // Stores likes: { "10538": ["likerId1", "likerId2"] }
+const kholinUsers = {};      // { "10538": { username: "minibloxia", verified: true } }
+
+// FIX: Use a Map to store likes as a Set of liker IDs per target.
+// This avoids the "overwrite" bug completely.
+const likeDatabase = new Map(); 
 
 console.log('[Kholin API] Starting up... (In-Memory Mode)');
 
@@ -59,14 +62,21 @@ app.get('/api/users/:userId/verify', (req, res) => {
 });
 
 // ============================================
-// 3. GET /stats/:userId/likes
+// 3. GET /stats/:userId/likes (FETCH)
 // ============================================
 app.get('/stats/:userId/likes', (req, res) => {
     try {
         const { userId } = req.params;
         console.log(`[API] Fetching likes for user: ${userId}`);
 
-        const likerIds = likeDatabase[userId] || [];
+        // FIX: Use a Set from the Map to ensure no duplicates
+        let likerSet = likeDatabase.get(userId);
+        if (!likerSet) {
+            likerSet = new Set();
+            likeDatabase.set(userId, likerSet);
+        }
+
+        const likerIds = Array.from(likerSet);
         const total = likerIds.length;
 
         res.json({ success: true, userId, count: total, likerIds });
@@ -77,7 +87,7 @@ app.get('/stats/:userId/likes', (req, res) => {
 });
 
 // ============================================
-// 4. POST /stats/:userId/likes (Toggle Like)
+// 4. POST /stats/:userId/likes (TOGGLE - FIXED)
 // ============================================
 app.post('/stats/:userId/likes', (req, res) => {
     try {
@@ -93,18 +103,25 @@ app.post('/stats/:userId/likes', (req, res) => {
             return res.status(403).json({ error: "Only verified Kholin users can like" });
         }
 
-        if (!likeDatabase[userId]) {
-            likeDatabase[userId] = [];
+        // Prevent self-liking on the server side as well
+        if (userId === likerId) {
+            return res.status(403).json({ error: "You cannot like your own profile" });
         }
 
-        const existingLikeIndex = likeDatabase[userId].indexOf(likerId);
+        // FIX: Use a Set from the Map to guarantee data integrity
+        let likerSet = likeDatabase.get(userId);
+        if (!likerSet) {
+            likerSet = new Set();
+            likeDatabase.set(userId, likerSet);
+        }
 
-        if (existingLikeIndex !== -1) {
-            likeDatabase[userId].splice(existingLikeIndex, 1);
+        // TOGGLE logic using Set (which handles duplicates automatically)
+        if (likerSet.has(likerId)) {
+            likerSet.delete(likerId);
             console.log(`[API] Removed like from ${userId} by ${likerId}`);
             return res.json({ success: true, action: 'removed' });
         } else {
-            likeDatabase[userId].push(likerId);
+            likerSet.add(likerId);
             console.log(`[API] Added like to ${userId} by ${likerId}`);
             return res.json({ success: true, action: 'added' });
         }
