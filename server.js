@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: Map/Set storage, correct 403 handling
+// server.js - ULTIMATE FIX: GET likes is public, POST likes requires verification
 const express = require('express');
 const cors = require('cors');
 
@@ -53,12 +53,12 @@ app.get('/api/users/:userId/verify', (req, res) => {
 });
 
 // ============================================
-// 3. FETCH LIKES
+// 3. FETCH LIKES (PUBLIC - NO 403 ERROR)
 // ============================================
 app.get('/stats/:userId/likes', (req, res) => {
     try {
         const { userId } = req.params;
-        // Ensure the user exists, otherwise return 0 likes
+        // ANYONE can fetch likes. We do NOT block this.
         const likerSet = likeDatabase.get(userId) || new Set();
         const likerIds = Array.from(likerSet);
         res.json({ success: true, userId, count: likerIds.length, likerIds });
@@ -68,7 +68,7 @@ app.get('/stats/:userId/likes', (req, res) => {
 });
 
 // ============================================
-// 4. TOGGLE LIKE (SYNCED & ATOMIC)
+// 4. TOGGLE LIKE (VERIFIED USERS ONLY)
 // ============================================
 app.post('/stats/:userId/likes', (req, res) => {
     try {
@@ -101,7 +101,6 @@ app.post('/stats/:userId/likes', (req, res) => {
         const updatedLikerIds = Array.from(likerSet);
         console.log(`[API] Like ${action}: ${userId} by ${likerId}. Count: ${updatedLikerIds.length}`);
 
-        // Return the NEW state for instant frontend sync
         res.json({ 
             success: true, 
             action: action,
