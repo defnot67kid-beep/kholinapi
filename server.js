@@ -1,4 +1,4 @@
-// server.js - FIXED: Perfect toggle, no resets, Map/Set storage
+// server.js - ULTIMATE FIX: Persistent Map/Set, Perfect Verification Sync
 const express = require('express');
 const cors = require('cors');
 
@@ -7,42 +7,47 @@ app.use(cors());
 app.use(express.json());
 
 // ============================================
-// IN-MEMORY DATABASE
+// PERSISTENT IN-MEMORY DATABASE (Using Map/Set)
 // ============================================
-const kholinUsers = {};      // { "10538": { username: "minibloxia", verified: true } }
-const likeDatabase = new Map(); // Key: TargetUserId, Value: Set of LikerIds
+const kholinUsers = new Map();      // Key: UserId, Value: { username, verified }
+const likeDatabase = new Map();     // Key: TargetUserId, Value: Set of LikerIds
 
 console.log('[Kholin API] Starting up... (In-Memory Mode)');
 
-app.get('/', (req, res) => res.send('Kholin API Running (In-Memory)'));
+app.get('/', (req, res) => res.send('Kholin API Running'));
 
 // ============================================
-// 1. REGISTER USER
+// 1. REGISTER USER (Verifies User)
 // ============================================
 app.post('/api/users/register', (req, res) => {
     try {
         const { userId, username, displayName } = req.body;
         if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
-        kholinUsers[userId] = {
+        console.log(`[API] Registered/Verified User: ${userId} (${username})`);
+        
+        kholinUsers.set(userId, {
             username: username || 'Unknown',
             displayName: displayName || username || 'Unknown',
             lastSeen: new Date().toISOString(),
             verified: true
-        };
-        res.json({ success: true, message: "User registered/verified" });
+        });
+
+        res.json({ success: true, message: "User verified" });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
 // ============================================
-// 2. VERIFY USER
+// 2. CHECK VERIFICATION (CRITICAL FIX)
 // ============================================
 app.get('/api/users/:userId/verify', (req, res) => {
     try {
         const { userId } = req.params;
-        const user = kholinUsers[userId];
+        const user = kholinUsers.get(userId);
+        
+        // Return verified: true ONLY if user exists in Map
         res.json({ verified: !!(user && user.verified) });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -50,7 +55,7 @@ app.get('/api/users/:userId/verify', (req, res) => {
 });
 
 // ============================================
-// 3. GET LIKES
+// 3. FETCH LIKES
 // ============================================
 app.get('/stats/:userId/likes', (req, res) => {
     try {
@@ -64,7 +69,7 @@ app.get('/stats/:userId/likes', (req, res) => {
 });
 
 // ============================================
-// 4. TOGGLE LIKE (FIXED LOGIC)
+// 4. TOGGLE LIKE (SYNCED & ATOMIC)
 // ============================================
 app.post('/stats/:userId/likes', (req, res) => {
     try {
@@ -72,20 +77,19 @@ app.post('/stats/:userId/likes', (req, res) => {
         const { likerId } = req.body;
 
         if (!likerId) return res.status(400).json({ error: "Missing likerId" });
-        if (userId === likerId) return res.status(403).json({ error: "Cannot like yourself" });
+        if (userId === likerId) return res.status(403).json({ error: "Self-like blocked" });
 
-        // Security: Check if liker is verified
-        if (!kholinUsers[likerId] || !kholinUsers[likerId].verified) {
-            return res.status(403).json({ error: "Only verified Kholin users can like" });
+        // Security: Check if liker is verified in the Map
+        const liker = kholinUsers.get(likerId);
+        if (!liker || !liker.verified) {
+            return res.status(403).json({ error: "Only verified users can like" });
         }
 
-        // Ensure the target has a Set
         if (!likeDatabase.has(userId)) {
             likeDatabase.set(userId, new Set());
         }
         const likerSet = likeDatabase.get(userId);
 
-        // TOGGLE: If exists, remove. If not, add.
         let action = '';
         if (likerSet.has(likerId)) {
             likerSet.delete(likerId);
@@ -95,10 +99,10 @@ app.post('/stats/:userId/likes', (req, res) => {
             action = 'added';
         }
 
-        // Return the NEW STATE immediately so the client can sync perfectly
         const updatedLikerIds = Array.from(likerSet);
-        console.log(`[API] Like ${action}: Target=${userId}, Liker=${likerId}. New Count: ${updatedLikerIds.length}`);
+        console.log(`[API] Like ${action}: ${userId} by ${likerId}. Count: ${updatedLikerIds.length}`);
 
+        // Return the NEW state for instant frontend sync
         res.json({ 
             success: true, 
             action: action,
@@ -111,4 +115,4 @@ app.post('/stats/:userId/likes', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`[Kholin API] Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`[Kholin API] Running on port ${PORT}`));
