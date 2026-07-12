@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: Clean JSON, Added usersLikedTo array
+// server.js - ULTIMATE FIX: Clean JSON, usersLikedTo, and likedBy arrays
 const express = require('express');
 const cors = require('cors');
 
@@ -116,28 +116,34 @@ app.post('/stats/:userId/likes', (req, res) => {
 });
 
 // ============================================
-// 5. GET ALL REGISTERED USERS (NEW ROUTE)
+// 5. GET ALL REGISTERED USERS (With like stats)
 // ============================================
 app.get('/api/users', (req, res) => {
     try {
         // Convert the Map to a readable JSON array
         const users = Array.from(kholinUsers.entries()).map(([userId, data]) => {
             
-            // CRITICAL FEATURE: Calculate the list of users THIS user has liked
+            // Calculate: Who has THIS user liked? (usersLikedTo)
             const usersLikedTo = [];
-            
-            // Iterate through the entire likeDatabase
             for (const [targetUserId, likerSet] of likeDatabase.entries()) {
-                // If this userId is inside the likerSet, it means they liked targetUserId
                 if (likerSet.has(userId)) {
                     usersLikedTo.push(targetUserId);
                 }
             }
 
+            // Calculate: Who has liked THIS user? (likedBy)
+            const likedBy = [];
+            const myLikers = likeDatabase.get(userId);
+            if (myLikers) {
+                // Add every ID from the Set into the array
+                likedBy.push(...Array.from(myLikers));
+            }
+
             return { 
                 userId, 
                 ...data,
-                usersLikedTo: usersLikedTo // Add the array of liked User IDs
+                usersLikedTo: usersLikedTo, // Users they clicked "Like" on
+                likedBy: likedBy            // Users who clicked "Like" on them
             };
         });
         
