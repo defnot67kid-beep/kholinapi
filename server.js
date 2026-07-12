@@ -1,106 +1,124 @@
-// server.js - Kholin User Verification API
+// server.js - Deploy to Render
 const express = require('express');
 const cors = require('cors');
-const bodyParser = require('body-parser');
+const { MongoClient } = require('mongodb'); // Requires 'mongodb' package
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-// Middleware
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// ============================================
-// DATABASE (In-Memory for testing)
-// Replace this with a real database (MongoDB, SQLite) later.
-// ============================================
-const kholinUsers = new Map();
+const MONGO_URI = process.env.MONGO_URI; // Set this in Render environment variables
+const DB_NAME = 'kholin_stats';
 
-// Add your own User ID here so you get the badge!
-kholinUsers.set('10538', { 
-    username: 'minibloxia', 
-    joined: '2026-04-23',
-    isKholin: true 
-});
+app.get('/', (req, res) => res.send('Kholin API Running'));
 
-// ============================================
-// ROUTES
-// ============================================
+// --- 1. REGISTER USER (Your existing logic) ---
+app.post('/api/users/register', async (req, res) => {
+    try {
+        const { userId, username, displayName, sessionToken } = req.body;
+        const client = new MongoClient(MONGO_URI);
+        await client.connect();
+        const db = client.db(DB_NAME);
+        const collection = db.collection('kholin_users');
 
-// Root endpoint
-app.get('/', (req, res) => {
-    res.json({ 
-        status: 'online', 
-        message: 'Kholin API is running',
-        endpoints: ['GET /verify/:userId', 'POST /register']
-    });
-});
-
-// 1. VERIFY USER (Public Endpoint)
-// Checks if a specific user ID is a Kholin member.
-app.get('/verify/:userId', (req, res) => {
-    const userId = req.params.userId;
-    
-    if (!userId) {
-        return res.status(400).json({ error: 'User ID is required' });
+        // Upsert user data, marking them as "verified" (Kholin user)
+        await collection.updateOne(
+            { userId: userId },
+            { $set: { username, displayName, lastSeen: new Date(), verified: true } },
+            { upsert: true }
+        );
+        await client.close();
+        res.json({ success: true, message: "User registered/verified" });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
+});
 
-    // Check the database
-    const user = kholinUsers.get(userId);
-    
-    if (user && user.isKholin) {
-        return res.json({ 
-            userId: userId, 
-            isKholin: true, 
-            username: user.username 
+// --- 2. GET /stats/:userId/likes ---
+app.get('/stats/:userId/likes', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const client = new MongoClient(MONGO_URI);
+        await client.connect();
+        const db = client.db(DB_NAME);
+        const likesCol = db.collection('likes');
+        const usersCol = db.collection('kholin_users');
+
+        // Get total likes for this user
+        const total = await likesCol.countDocuments({ targetId: userId });
+
+        // Get list of who liked them (for the "Verified" check later)
+        const likers = await likesCol.find({ targetId: userId }).toArray();
+        const likerIds = likers.map(l => l.likerId);
+
+        await client.close();
+        res.json({ success: true, userId, count: total, likerIds });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- 3. POST /stats/:userId/likes (Toggle Like) ---
+app.post('/stats/:userId/likes', async (req, res) => {
+    try {
+        const { userId } = req.params; // The person being liked
+        const { likerId } = req.body; // The person clicking the button
+
+        if (!likerId) return res.status(400).json({ error: "Missing likerId" });
+
+        const client = new MongoClient(MONGO_URI);
+        await client.connect();
+        const db = client.db(DB_NAME);
+        const likesCol = db.collection('likes');
+        const usersCol = db.collection('kholin_users');
+
+        // SECURITY: Check if the liker is verified (Kholin user)
+        const liker = await usersCol.findOne({ userId: likerId });
+        if (!liker || !liker.verified) {
+            await client.close();
+            return res.status(403).json({ error: "Only verified Kholin users can like" });
+        }
+
+        // Toggle logic
+        const existingLike = await likesCol.findOne({ targetId: userId, likerId: likerId });
+        
+        if (existingLike) {
+            await likesCol.deleteOne({ targetId: userId, likerId: likerId });
+            await client.close();
+            return res.json({ success: true, action: 'removed' });
+        } else {
+            await likesCol.insertOne({ targetId: userId, likerId: likerId, createdAt: new Date() });
+            await client.close();
+            return res.json({ success: true, action: 'added' });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// --- 4. GET /stats/:userId/subscription ---
+app.get('/stats/:userId/subscription', async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const client = new MongoClient(MONGO_URI);
+        await client.connect();
+        const db = client.db(DB_NAME);
+        const usersCol = db.collection('kholin_users');
+
+        const user = await usersCol.findOne({ userId: userId });
+        await client.close();
+
+        // Default to 'free' if not found
+        res.json({ 
+            success: true, 
+            userId, 
+            tier: user?.subscriptionTier || 'free', 
+            expiresAt: user?.subscriptionExpiry || null 
         });
-    } else {
-        return res.json({ 
-            userId: userId, 
-            isKholin: false 
-        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
     }
 });
 
-// 2. REGISTER/LOGIN (Private - Used by the extension)
-// When a user installs the extension, they send their data here.
-app.post('/register', (req, res) => {
-    const { userId, username, displayName } = req.body;
-
-    if (!userId || !username) {
-        return res.status(400).json({ error: 'Missing userId or username' });
-    }
-
-    // Save user to database (Update if exists, Add if new)
-    kholinUsers.set(userId, {
-        username: username,
-        displayName: displayName || username,
-        joined: new Date().toISOString(),
-        isKholin: true  // By default, anyone who registers via extension is a Kholin user
-    });
-
-    console.log(`[Kholin API] Registered/Updated user: ${username} (ID: ${userId})`);
-    
-    return res.json({ 
-        success: true, 
-        message: 'User registered successfully',
-        isKholin: true 
-    });
-});
-
-// 3. GET ALL KHOLIN USERS (For debugging)
-app.get('/users', (req, res) => {
-    const users = Array.from(kholinUsers.entries()).map(([id, data]) => ({
-        id: id,
-        username: data.username,
-        isKholin: data.isKholin
-    }));
-    res.json({ count: users.length, users: users });
-});
-
-// ============================================
-// START SERVER
-// ============================================
-app.listen(PORT, () => {
-    console.log(`[Kholin API] Server running on port ${PORT}`);
-});
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
