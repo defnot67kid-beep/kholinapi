@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: Strict Verification, Database Check
+// server.js - ULTIMATE FIX: Clean JSON, Persistent Data, Owner Check
 const express = require('express');
 const cors = require('cors');
 
@@ -9,34 +9,32 @@ app.use(express.json());
 // ============================================
 // PERSISTENT IN-MEMORY DATABASE
 // ============================================
-const kholinUsers = new Map();      // Key: UserId, Value: { username, verified }
+const kholinUsers = new Map();      // Key: UserId, Value: { username, displayName, verified }
 const likeDatabase = new Map();     // Key: TargetUserId, Value: Set of LikerIds
+
+const OWNER_ID = "10538"; // <<< YOUR SUPER ADMIN ID HERE
 
 console.log('[Kholin API] Starting up... (In-Memory Mode)');
 app.get('/', (req, res) => res.send('Kholin API Running'));
 
 // ============================================
-// 1. REGISTER & SYNC VERIFIED USER
+// 1. REGISTER & VERIFY USER
 // ============================================
 app.post('/api/users/register', (req, res) => {
     try {
         let { userId, username, displayName, friendship_status, follow_status } = req.body;
         if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
-        // Sanitize strings
         username = (username || 'Unknown').replace(/[\n\r]+/g, '').trim();
         displayName = (displayName || username).replace(/[\n\r]+/g, '').trim();
 
-        // STRICT CHECK: User MUST be self to be verified
         const isSelf = (friendship_status === "self" && follow_status === "self");
 
-        console.log(`[API] Processing User: ${userId} (${username}) - Self: ${isSelf}`);
-        
         kholinUsers.set(userId, {
             username: username,
             displayName: displayName,
             lastSeen: new Date().toISOString(),
-            verified: isSelf // ONLY verified if they are self!
+            verified: isSelf
         });
 
         res.json({ success: true, message: "User synced", verified: isSelf });
@@ -46,26 +44,27 @@ app.post('/api/users/register', (req, res) => {
 });
 
 // ============================================
-// 2. STRICT VERIFICATION CHECK
+// 2. STRICT VERIFICATION & OWNER CHECK
 // ============================================
 app.get('/api/users/:userId/verify', (req, res) => {
     try {
         const { userId } = req.params;
         const user = kholinUsers.get(userId);
         
-        // If user doesn't exist, they are NOT verified
-        if (!user) {
-            return res.json({ verified: false });
-        }
-        
-        res.json({ verified: user.verified === true });
+        const verified = !!(user && user.verified);
+        const isOwner = (userId === OWNER_ID);
+
+        res.json({ 
+            verified: verified, 
+            owner: isOwner  // <<< RETURN OWNER STATUS
+        });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
 });
 
 // ============================================
-// 3. FETCH LIKES (PUBLIC)
+// 3. FETCH LIKES
 // ============================================
 app.get('/stats/:userId/likes', (req, res) => {
     try {
@@ -79,7 +78,7 @@ app.get('/stats/:userId/likes', (req, res) => {
 });
 
 // ============================================
-// 4. TOGGLE LIKE (STRICT: VERIFIED USERS ONLY)
+// 4. TOGGLE LIKE
 // ============================================
 app.post('/stats/:userId/likes', (req, res) => {
     try {
@@ -89,15 +88,10 @@ app.post('/stats/:userId/likes', (req, res) => {
         if (!likerId) return res.status(400).json({ error: "Missing likerId" });
         if (userId === likerId) return res.status(403).json({ error: "Self-like blocked" });
 
-        // STRICT SECURITY: Check if liker is verified in the Map
         const liker = kholinUsers.get(likerId);
-        if (!liker || !liker.verified) {
-            return res.status(403).json({ error: "Only verified users can like" });
-        }
+        if (!liker || !liker.verified) return res.status(403).json({ error: "Only verified users can like" });
 
-        if (!likeDatabase.has(userId)) {
-            likeDatabase.set(userId, new Set());
-        }
+        if (!likeDatabase.has(userId)) likeDatabase.set(userId, new Set());
         const likerSet = likeDatabase.get(userId);
 
         let action = '';
@@ -110,14 +104,36 @@ app.post('/stats/:userId/likes', (req, res) => {
         }
 
         const updatedLikerIds = Array.from(likerSet);
-        console.log(`[API] Like ${action}: ${userId} by ${likerId}. Count: ${updatedLikerIds.length}`);
-
         res.json({ 
             success: true, 
             action: action,
             count: updatedLikerIds.length,
             likerIds: updatedLikerIds
         });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ============================================
+// 5. GET ALL REGISTERED USERS
+// ============================================
+app.get('/api/users', (req, res) => {
+    try {
+        const users = Array.from(kholinUsers.entries()).map(([userId, data]) => {
+            
+            const usersLikedTo = [];
+            for (const [targetUserId, likerSet] of likeDatabase.entries()) {
+                if (likerSet.has(userId)) usersLikedTo.push(targetUserId);
+            }
+
+            const likedBy = [];
+            const myLikers = likeDatabase.get(userId);
+            if (myLikers) likedBy.push(...Array.from(myLikers));
+
+            return { userId, ...data, usersLikedTo, likedBy };
+        });
+        res.json({ success: true, count: users.length, users });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
