@@ -26,7 +26,6 @@ app.post('/api/users/register', (req, res) => {
 
         console.log(`[API] Registering/Verifying user: ${userId} (${username})`);
         
-        // Store user in memory
         kholinUsers[userId] = {
             username: username || 'Unknown',
             displayName: displayName || username || 'Unknown',
@@ -42,7 +41,7 @@ app.post('/api/users/register', (req, res) => {
 });
 
 // ============================================
-// 2. CHECK IF A USER IS VERIFIED (NEW)
+// 2. CHECK IF A USER IS VERIFIED
 // ============================================
 app.get('/api/users/:userId/verify', (req, res) => {
     try {
@@ -88,13 +87,12 @@ app.post('/stats/:userId/likes', (req, res) => {
         if (!likerId) return res.status(400).json({ error: "Missing likerId" });
         console.log(`[API] Toggling like: Target=${userId}, Liker=${likerId}`);
 
-        // SECURITY: Check if the liker is verified in our in-memory list
+        // SECURITY: Check if the liker is verified
         const liker = kholinUsers[likerId];
         if (!liker || !liker.verified) {
             return res.status(403).json({ error: "Only verified Kholin users can like" });
         }
 
-        // Initialize array if it doesn't exist
         if (!likeDatabase[userId]) {
             likeDatabase[userId] = [];
         }
@@ -102,36 +100,16 @@ app.post('/stats/:userId/likes', (req, res) => {
         const existingLikeIndex = likeDatabase[userId].indexOf(likerId);
 
         if (existingLikeIndex !== -1) {
-            // REMOVE LIKE
             likeDatabase[userId].splice(existingLikeIndex, 1);
+            console.log(`[API] Removed like from ${userId} by ${likerId}`);
             return res.json({ success: true, action: 'removed' });
         } else {
-            // ADD LIKE
             likeDatabase[userId].push(likerId);
+            console.log(`[API] Added like to ${userId} by ${likerId}`);
             return res.json({ success: true, action: 'added' });
         }
     } catch (e) {
         console.error('[API ERROR] POST likes failed:', e.message);
-        res.status(500).json({ error: e.message });
-    }
-});
-
-// ============================================
-// 5. GET /stats/:userId/subscription
-// ============================================
-app.get('/stats/:userId/subscription', (req, res) => {
-    try {
-        const { userId } = req.params;
-        const user = kholinUsers[userId];
-
-        res.json({ 
-            success: true, 
-            userId, 
-            tier: user?.subscriptionTier || 'free', 
-            expiresAt: null 
-        });
-    } catch (e) {
-        console.error('[API ERROR] Subscription failed:', e.message);
         res.status(500).json({ error: e.message });
     }
 });
