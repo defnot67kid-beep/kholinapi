@@ -1,37 +1,37 @@
-// server.js - Deploy to Render (With detailed logging)
+// server.js - No MongoDB, In-Memory Storage (Fixes 500 error)
 const express = require('express');
 const cors = require('cors');
-const { MongoClient } = require('mongodb');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const MONGO_URI = process.env.MONGO_URI;
-const DB_NAME = 'kholin_stats';
+// ============================================
+// IN-MEMORY DATABASE (Resets on Render restart)
+// ============================================
+const kholinUsers = {};      // Stores verified users: { "10538": { username: "minibloxia", verified: true } }
+const likeDatabase = {};     // Stores likes: { "10538": ["likerId1", "likerId2"] }
 
-console.log('[Kholin API] Starting up...');
-console.log(`[Kholin API] MONGO_URI exists: ${MONGO_URI ? 'Yes' : 'No'}`);
+console.log('[Kholin API] Starting up... (In-Memory Mode)');
 
-app.get('/', (req, res) => res.send('Kholin API Running'));
+app.get('/', (req, res) => res.send('Kholin API Running (In-Memory)'));
 
 // --- 1. REGISTER USER ---
-app.post('/api/users/register', async (req, res) => {
+app.post('/api/users/register', (req, res) => {
     try {
         const { userId, username, displayName } = req.body;
-        console.log(`[API] Registering user: ${userId} (${username})`);
+        if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
-        const client = new MongoClient(MONGO_URI);
-        await client.connect();
-        const db = client.db(DB_NAME);
-        const collection = db.collection('kholin_users');
+        console.log(`[API] Registering/Verifying user: ${userId} (${username})`);
+        
+        // Store user in memory
+        kholinUsers[userId] = {
+            username: username || 'Unknown',
+            displayName: displayName || username || 'Unknown',
+            lastSeen: new Date().toISOString(),
+            verified: true
+        };
 
-        await collection.updateOne(
-            { userId: userId },
-            { $set: { username, displayName, lastSeen: new Date(), verified: true } },
-            { upsert: true }
-        );
-        await client.close();
         res.json({ success: true, message: "User registered/verified" });
     } catch (e) {
         console.error('[API ERROR] Register failed:', e.message);
@@ -40,21 +40,15 @@ app.post('/api/users/register', async (req, res) => {
 });
 
 // --- 2. GET /stats/:userId/likes ---
-app.get('/stats/:userId/likes', async (req, res) => {
+app.get('/stats/:userId/likes', (req, res) => {
     try {
         const { userId } = req.params;
         console.log(`[API] Fetching likes for user: ${userId}`);
 
-        const client = new MongoClient(MONGO_URI);
-        await client.connect();
-        const db = client.db(DB_NAME);
-        const likesCol = db.collection('likes');
+        // Get likes array or empty array
+        const likerIds = likeDatabase[userId] || [];
+        const total = likerIds.length;
 
-        const total = await likesCol.countDocuments({ targetId: userId });
-        const likers = await likesCol.find({ targetId: userId }).toArray();
-        const likerIds = likers.map(l => l.likerId);
-
-        await client.close();
         res.json({ success: true, userId, count: total, likerIds });
     } catch (e) {
         console.error('[API ERROR] GET likes failed:', e.message);
@@ -63,7 +57,7 @@ app.get('/stats/:userId/likes', async (req, res) => {
 });
 
 // --- 3. POST /stats/:userId/likes (Toggle Like) ---
-app.post('/stats/:userId/likes', async (req, res) => {
+app.post('/stats/:userId/likes', (req, res) => {
     try {
         const { userId } = req.params;
         const { likerId } = req.body;
@@ -71,28 +65,26 @@ app.post('/stats/:userId/likes', async (req, res) => {
         if (!likerId) return res.status(400).json({ error: "Missing likerId" });
         console.log(`[API] Toggling like: Target=${userId}, Liker=${likerId}`);
 
-        const client = new MongoClient(MONGO_URI);
-        await client.connect();
-        const db = client.db(DB_NAME);
-        const likesCol = db.collection('likes');
-        const usersCol = db.collection('kholin_users');
-
-        // SECURITY: Check if the liker is verified
-        const liker = await usersCol.findOne({ userId: likerId });
+        // SECURITY: Check if the liker is verified in our in-memory list
+        const liker = kholinUsers[likerId];
         if (!liker || !liker.verified) {
-            await client.close();
             return res.status(403).json({ error: "Only verified Kholin users can like" });
         }
 
-        const existingLike = await likesCol.findOne({ targetId: userId, likerId: likerId });
-        
-        if (existingLike) {
-            await likesCol.deleteOne({ targetId: userId, likerId: likerId });
-            await client.close();
+        // Initialize array if it doesn't exist
+        if (!likeDatabase[userId]) {
+            likeDatabase[userId] = [];
+        }
+
+        const existingLikeIndex = likeDatabase[userId].indexOf(likerId);
+
+        if (existingLikeIndex !== -1) {
+            // REMOVE LIKE
+            likeDatabase[userId].splice(existingLikeIndex, 1);
             return res.json({ success: true, action: 'removed' });
         } else {
-            await likesCol.insertOne({ targetId: userId, likerId: likerId, createdAt: new Date() });
-            await client.close();
+            // ADD LIKE
+            likeDatabase[userId].push(likerId);
             return res.json({ success: true, action: 'added' });
         }
     } catch (e) {
@@ -102,22 +94,16 @@ app.post('/stats/:userId/likes', async (req, res) => {
 });
 
 // --- 4. GET /stats/:userId/subscription ---
-app.get('/stats/:userId/subscription', async (req, res) => {
+app.get('/stats/:userId/subscription', (req, res) => {
     try {
         const { userId } = req.params;
-        const client = new MongoClient(MONGO_URI);
-        await client.connect();
-        const db = client.db(DB_NAME);
-        const usersCol = db.collection('kholin_users');
-
-        const user = await usersCol.findOne({ userId: userId });
-        await client.close();
+        const user = kholinUsers[userId];
 
         res.json({ 
             success: true, 
             userId, 
             tier: user?.subscriptionTier || 'free', 
-            expiresAt: user?.subscriptionExpiry || null 
+            expiresAt: null 
         });
     } catch (e) {
         console.error('[API ERROR] Subscription failed:', e.message);
