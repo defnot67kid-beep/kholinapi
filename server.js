@@ -1,4 +1,4 @@
-// server.js - No MongoDB, In-Memory Storage (Fixes 500 error)
+// server.js - No MongoDB, In-Memory Storage (Full with Verification Endpoint)
 const express = require('express');
 const cors = require('cors');
 
@@ -16,7 +16,9 @@ console.log('[Kholin API] Starting up... (In-Memory Mode)');
 
 app.get('/', (req, res) => res.send('Kholin API Running (In-Memory)'));
 
-// --- 1. REGISTER USER ---
+// ============================================
+// 1. REGISTER USER (Adds/Updates user to memory)
+// ============================================
 app.post('/api/users/register', (req, res) => {
     try {
         const { userId, username, displayName } = req.body;
@@ -39,13 +41,32 @@ app.post('/api/users/register', (req, res) => {
     }
 });
 
-// --- 2. GET /stats/:userId/likes ---
+// ============================================
+// 2. CHECK IF A USER IS VERIFIED (NEW)
+// ============================================
+app.get('/api/users/:userId/verify', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const user = kholinUsers[userId];
+        
+        if (user && user.verified) {
+            res.json({ verified: true });
+        } else {
+            res.json({ verified: false });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ============================================
+// 3. GET /stats/:userId/likes
+// ============================================
 app.get('/stats/:userId/likes', (req, res) => {
     try {
         const { userId } = req.params;
         console.log(`[API] Fetching likes for user: ${userId}`);
 
-        // Get likes array or empty array
         const likerIds = likeDatabase[userId] || [];
         const total = likerIds.length;
 
@@ -56,7 +77,9 @@ app.get('/stats/:userId/likes', (req, res) => {
     }
 });
 
-// --- 3. POST /stats/:userId/likes (Toggle Like) ---
+// ============================================
+// 4. POST /stats/:userId/likes (Toggle Like)
+// ============================================
 app.post('/stats/:userId/likes', (req, res) => {
     try {
         const { userId } = req.params;
@@ -93,7 +116,9 @@ app.post('/stats/:userId/likes', (req, res) => {
     }
 });
 
-// --- 4. GET /stats/:userId/subscription ---
+// ============================================
+// 5. GET /stats/:userId/subscription
+// ============================================
 app.get('/stats/:userId/subscription', (req, res) => {
     try {
         const { userId } = req.params;
