@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: Strict Admin Enforcement (Only ID 10538)
+// server.js - SECURE KEY SYSTEM: Generates unique keys, Admin check via is_admin
 const express = require('express');
 const cors = require('cors');
 
@@ -9,16 +9,25 @@ app.use(express.json());
 // ============================================
 // PERSISTENT IN-MEMORY DATABASE
 // ============================================
-const kholinUsers = new Map();      // Key: UserId, Value: { username, displayName, verified }
+const kholinUsers = new Map();      // Key: UserId, Value: { username, verified, secret_key, is_admin }
 const likeDatabase = new Map();     // Key: TargetUserId, Value: Set of LikerIds
-
-const SUPER_ADMIN_ID = "10538";
 
 console.log('[Kholin API] Starting up... (In-Memory Mode)');
 app.get('/', (req, res) => res.send('Kholin API Running'));
 
+// Helper to generate a unique key
+function generateSecretKey() {
+    const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    const length = 64;
+    for (let i = 0; i < length; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+}
+
 // ============================================
-// 1. REGISTER & VERIFY USER
+// 1. REGISTER & VERIFY USER (Generates Secret Key)
 // ============================================
 app.post('/api/users/register', (req, res) => {
     try {
@@ -30,14 +39,30 @@ app.post('/api/users/register', (req, res) => {
 
         const isSelf = (friendship_status === "self" && follow_status === "self");
 
+        // IMPORTANT: Generate a unique secret key for this user
+        const secret_key = generateSecretKey();
+        
+        // IMPORTANT: Hardcode Admin access to ID 10538
+        const is_admin = (userId === "10538");
+
         kholinUsers.set(userId, {
             username: username,
             displayName: displayName,
             lastSeen: new Date().toISOString(),
-            verified: isSelf
+            verified: isSelf,
+            secret_key: secret_key,
+            is_admin: is_admin
         });
 
-        res.json({ success: true, message: "User synced", verified: isSelf });
+        console.log(`[API] Registered User: ${userId} | Admin: ${is_admin} | Key: ${secret_key.substring(0, 8)}...`);
+
+        res.json({ 
+            success: true, 
+            message: "User synced", 
+            verified: isSelf, 
+            secret_key: secret_key, // Return the key to the client
+            is_admin: is_admin 
+        });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -51,14 +76,13 @@ app.get('/api/users/:userId/verify', (req, res) => {
         const { userId } = req.params;
         const user = kholinUsers.get(userId);
         
-        const verified = !!(user && user.verified);
+        if (!user) {
+            return res.json({ verified: false, admin: false });
+        }
         
-        // STRICT RULE: ONLY Admin if the TARGET User ID matches 10538
-        const isAdmin = (userId === SUPER_ADMIN_ID);
-
         res.json({ 
-            verified: verified, 
-            admin: isAdmin  // ONLY 10538 gets this
+            verified: user.verified === true, 
+            admin: user.is_admin === true // Check the database flag
         });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -118,7 +142,7 @@ app.post('/stats/:userId/likes', (req, res) => {
 });
 
 // ============================================
-// 5. GET ALL REGISTERED USERS
+// 5. GET ALL REGISTERED USERS (Secure: Hides secret keys)
 // ============================================
 app.get('/api/users', (req, res) => {
     try {
@@ -133,7 +157,8 @@ app.get('/api/users', (req, res) => {
             const myLikers = likeDatabase.get(userId);
             if (myLikers) likedBy.push(...Array.from(myLikers));
 
-            return { userId, ...data, usersLikedTo, likedBy };
+            // DO NOT return the secret_key in this public endpoint
+            return { userId, ...data, secret_key: undefined };
         });
         res.json({ success: true, count: users.length, users });
     } catch (e) {
