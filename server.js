@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: Clean JSON, usersLikedTo, and likedBy arrays
+// server.js - ULTIMATE FIX: Persistent Users, Clean JSON, Social Arrays
 const express = require('express');
 const cors = require('cors');
 
@@ -12,6 +12,25 @@ app.use(express.json());
 const kholinUsers = new Map();      // Key: UserId, Value: { username, verified }
 const likeDatabase = new Map();     // Key: TargetUserId, Value: Set of LikerIds
 
+// ============================================
+// BACKUP: AUTO-RESTORE VERIFIED USERS ON STARTUP
+// ============================================
+const persistentUsers = [
+    { userId: "10538", username: "minibloxia" },
+    { userId: "17163", username: "vortexrants" }
+];
+
+// Restore users into Map on startup
+persistentUsers.forEach(user => {
+    kholinUsers.set(user.userId, {
+        username: user.username,
+        displayName: user.username,
+        lastSeen: new Date().toISOString(),
+        verified: true
+    });
+    console.log(`[API] Persistently loaded user: ${user.userId} (${user.username})`);
+});
+
 console.log('[Kholin API] Starting up... (In-Memory Mode)');
 
 app.get('/', (req, res) => res.send('Kholin API Running'));
@@ -24,7 +43,7 @@ app.post('/api/users/register', (req, res) => {
         let { userId, username, displayName } = req.body;
         if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
-        // CRITICAL FIX: Sanitize strings to remove \n and extra spaces
+        // Sanitize strings to remove \n and extra spaces
         username = (username || 'Unknown').replace(/[\n\r]+/g, '').trim();
         displayName = (displayName || username).replace(/[\n\r]+/g, '').trim();
 
@@ -81,7 +100,6 @@ app.post('/stats/:userId/likes', (req, res) => {
         if (!likerId) return res.status(400).json({ error: "Missing likerId" });
         if (userId === likerId) return res.status(403).json({ error: "Self-like blocked" });
 
-        // Security: Check if liker is verified in the Map
         const liker = kholinUsers.get(likerId);
         if (!liker || !liker.verified) {
             return res.status(403).json({ error: "Only verified users can like" });
@@ -120,10 +138,9 @@ app.post('/stats/:userId/likes', (req, res) => {
 // ============================================
 app.get('/api/users', (req, res) => {
     try {
-        // Convert the Map to a readable JSON array
         const users = Array.from(kholinUsers.entries()).map(([userId, data]) => {
             
-            // Calculate: Who has THIS user liked? (usersLikedTo)
+            // Calculate: Who has THIS user liked?
             const usersLikedTo = [];
             for (const [targetUserId, likerSet] of likeDatabase.entries()) {
                 if (likerSet.has(userId)) {
@@ -131,19 +148,18 @@ app.get('/api/users', (req, res) => {
                 }
             }
 
-            // Calculate: Who has liked THIS user? (likedBy)
+            // Calculate: Who has liked THIS user?
             const likedBy = [];
             const myLikers = likeDatabase.get(userId);
             if (myLikers) {
-                // Add every ID from the Set into the array
                 likedBy.push(...Array.from(myLikers));
             }
 
             return { 
                 userId, 
                 ...data,
-                usersLikedTo: usersLikedTo, // Users they clicked "Like" on
-                likedBy: likedBy            // Users who clicked "Like" on them
+                usersLikedTo: usersLikedTo,
+                likedBy: likedBy
             };
         });
         
