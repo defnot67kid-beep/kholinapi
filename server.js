@@ -1,4 +1,4 @@
-// server.js - ULTIMATE FIX: Clean JSON, Persistent Data, Owner Check
+// server.js - ULTIMATE FIX: Strict Admin Enforcement (Only ID 10538)
 const express = require('express');
 const cors = require('cors');
 
@@ -12,7 +12,7 @@ app.use(express.json());
 const kholinUsers = new Map();      // Key: UserId, Value: { username, displayName, verified }
 const likeDatabase = new Map();     // Key: TargetUserId, Value: Set of LikerIds
 
-const OWNER_ID = "10538"; // <<< YOUR SUPER ADMIN ID HERE
+const SUPER_ADMIN_ID = "10538";
 
 console.log('[Kholin API] Starting up... (In-Memory Mode)');
 app.get('/', (req, res) => res.send('Kholin API Running'));
@@ -44,7 +44,7 @@ app.post('/api/users/register', (req, res) => {
 });
 
 // ============================================
-// 2. STRICT VERIFICATION & OWNER CHECK
+// 2. STRICT VERIFICATION & ADMIN CHECK
 // ============================================
 app.get('/api/users/:userId/verify', (req, res) => {
     try {
@@ -52,11 +52,13 @@ app.get('/api/users/:userId/verify', (req, res) => {
         const user = kholinUsers.get(userId);
         
         const verified = !!(user && user.verified);
-        const isOwner = (userId === OWNER_ID);
+        
+        // STRICT RULE: ONLY Admin if the TARGET User ID matches 10538
+        const isAdmin = (userId === SUPER_ADMIN_ID);
 
         res.json({ 
             verified: verified, 
-            owner: isOwner  // <<< RETURN OWNER STATUS
+            admin: isAdmin  // ONLY 10538 gets this
         });
     } catch (e) {
         res.status(500).json({ error: e.message });
