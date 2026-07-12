@@ -100,13 +100,27 @@ app.post('/stats/:userId/likes', (req, res) => {
         const updatedLikerIds = Array.from(likerSet);
         console.log(`[API] Like ${action}: ${userId} by ${likerId}. Count: ${updatedLikerIds.length}`);
 
-        // CRITICAL FIX: Return the FULL updated state
         res.json({ 
             success: true, 
             action: action,
             count: updatedLikerIds.length,
             likerIds: updatedLikerIds
         });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ============================================
+// 5. GET ALL REGISTERED USERS (NEW ROUTE)
+// ============================================
+app.get('/api/users', (req, res) => {
+    try {
+        // Convert the Map to a readable JSON array
+        const users = Array.from(kholinUsers.entries()).map(([userId, data]) => {
+            return { userId, ...data };
+        });
+        res.json({ success: true, count: users.length, users });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
