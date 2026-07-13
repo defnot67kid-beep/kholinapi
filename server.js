@@ -9,7 +9,7 @@ app.use(express.json());
 // ============================================
 // PERSISTENT IN-MEMORY DATABASE
 // ============================================
-const kholinUsers = new Map();      // Key: UserId, Value: { username, verified, secret_key, is_admin }
+const kholinUsers = new Map();      // Key: UserId, Value: { username, verified, secret_key, is_admin, bio }
 const likeDatabase = new Map();     // Key: TargetUserId, Value: Set of LikerIds
 
 console.log('[Kholin API] Starting up... (In-Memory Mode)');
@@ -45,14 +45,18 @@ app.post('/api/users/register', (req, res) => {
         // IMPORTANT: Hardcode Admin access to ID 10538
         const is_admin = (userId === "10538");
 
-        kholinUsers.set(userId, {
+        // Store user data
+        const userData = {
             username: username,
             displayName: displayName,
             lastSeen: new Date().toISOString(),
             verified: isSelf,
             secret_key: secret_key,
-            is_admin: is_admin
-        });
+            is_admin: is_admin,
+            bio: "" // Initialize empty bio
+        };
+
+        kholinUsers.set(userId, userData);
 
         console.log(`[API] Registered User: ${userId} | Admin: ${is_admin} | Key: ${secret_key.substring(0, 8)}...`);
 
@@ -157,10 +161,40 @@ app.get('/api/users', (req, res) => {
             const myLikers = likeDatabase.get(userId);
             if (myLikers) likedBy.push(...Array.from(myLikers));
 
-            // DO NOT return the secret_key in this public endpoint
-            return { userId, ...data, secret_key: undefined };
+            // DO NOT return the secret_key or bio in this public endpoint
+            return { userId, ...data, secret_key: undefined, bio: undefined };
         });
         res.json({ success: true, count: users.length, users });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// ============================================
+// 6. GET & UPDATE USER BIO (Stored in Kholin DB)
+// ============================================
+app.get('/api/users/:userId/bio', (req, res) => {
+    const { userId } = req.params;
+    const user = kholinUsers.get(userId);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json({ success: true, bio: user.bio || "" });
+});
+
+app.post('/api/users/:userId/bio', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { bio } = req.body;
+
+        if (!kholinUsers.has(userId)) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const user = kholinUsers.get(userId);
+        user.bio = bio.substring(0, 1000); // Enforce 1000 char limit
+        kholinUsers.set(userId, user);
+
+        console.log(`[API] Bio updated for ${userId}: "${bio.substring(0, 30)}..."`);
+        res.json({ success: true, message: "Bio updated successfully" });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
